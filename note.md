@@ -1,4 +1,4 @@
-# TS基础操作
+# TypeScript类型体操基础
 
 ## 关键字理解
 
@@ -777,4 +777,579 @@ type GreaterThan<
 type res = GreaterThan<3, 2>; // true
 type res2 = GreaterThan<3, 3>; // false
 type res3 = GreaterThan<3, 4>; // false
+```
+
+### 斐波那契数列
+
+有了上面的基本运算，这个实现起来是不难了，但是要注意数值传递的关系
+
+```ts
+type BuildArray<
+  Length extends number,
+  Ele = unknown,
+  Arr extends unknown[] = []
+> = Arr["length"] extends Length ? Arr : BuildArray<Length, Ele, [...Arr, Ele]>;
+
+type Add<N1 extends number, N2 extends number> = [
+  ...BuildArray<N1>,
+  ...BuildArray<N2>
+]["length"];
+
+type Fib<
+  N extends number,
+  Cur extends number = 2,
+  Pre extends number = 1,
+  Counter extends any[] = [1, 1]
+> = N extends Counter["length"]
+  ? Cur
+  : Fib<
+      N,
+      Add<Cur, Pre> extends number ? Add<Cur, Pre> : never,
+      Cur,
+      [...Counter, any]
+    >;
+
+type GetFib<N extends number> = N extends 0 | 1 ? 1 : Fib<N>;
+
+type res0 = GetFib<0>; // 1
+type res1 = GetFib<1>; // 1
+type res2 = GetFib<2>; // 2
+type res3 = GetFib<3>; // 3
+type res4 = GetFib<4>; // 5
+type res5 = GetFib<5>; // 8
+type res6 = GetFib<6>; // 13
+type res7 = GetFib<7>; // 21
+```
+
+或者继续使用元组计数
+
+```ts
+type FibonacciLoop<
+    PrevArr extends unknown[], 
+    CurrentArr extends unknown[], 
+    IndexArr extends unknown[] = [], 
+    Num extends number = 1
+> = IndexArr['length'] extends Num
+    ? CurrentArr['length']
+    : FibonacciLoop<CurrentArr, [...PrevArr, ...CurrentArr], [...IndexArr, unknown], Num> 
+
+type Fibonacci<Num extends number> = FibonacciLoop<[1], [1,1], [1,1], Num>;
+
+type res8 = Fibonacci<8> // 34
+```
+
+## 简化联合
+
+### 分布式条件类型
+
+当类型参数为联合类型，并且在条件类型左边直接引用该类型参数的时候，TypeScript 会把每一个元素单独传入来做类型运算，最后再合并成联合类型，这种语法叫做分布式条件类型。
+
+```ts
+// 比如这样一个联合类型：
+type Union = 'a' | 'b' | 'c';
+// 我们想把其中的 a 大写，就可以这样写：
+type UppercaseA<Item extends string> =
+    Item extends 'a' ?  Uppercase<Item> : Item;
+```
+
+像分配律那样，拆解类型参数，逐一执行，再合并
+
+```ts
+// 拆
+'a' extends 'a' ?  Uppercase<Item> : Item;
+'b' extends 'a' ?  Uppercase<Item> : Item;
+'c' extends 'a' ?  Uppercase<Item> : Item;
+
+// 合
+'a' extends 'a' ?  Uppercase<Item> : Item |
+'b' extends 'a' ?  Uppercase<Item> : Item |
+'c' extends 'a' ?  Uppercase<Item> : Item
+
+// 相当于
+UppercaseA<'a'> |  UppercaseA<'b'> | UppercaseA<'c'>
+
+// 结果是
+'A' | 'b' | 'c'
+```
+
+注意满足的条件
+
+1. 入参是联合类型
+2. 入参被直接引用（直接跟`extends`）
+
+#### 例子
+
+```ts
+type UpperFirst<Str extends string> = Str extends `${infer First}${infer Rest}`
+  ? `${Uppercase<First>}${Rest}`
+  : never;
+
+type UniStr = "beyond" | "typescript" | "hello";
+
+type res = UpperFirst<UniStr>;
+// type res = "Beyond" | "Typescript" | "Hello"
+```
+
+### 判断联合类型
+
+#### 前置例子
+
+```ts
+type TestUnion<A, B = A> = A extends B ? { a: A; b: B } : never;
+
+type TestUnionResult = TestUnion<"a" | "b" | "c">;
+
+/*
+type TestUnionResult = {
+  a: "a";
+  b: "a" | "b" | "c";
+} | {
+  a: "b";
+  b: "a" | "b" | "c";
+} | {
+  a: "c";
+  b: "a" | "b" | "c";
+}
+ */
+```
+
+条件类型中如果左边的类型是联合类型(A)，会把每个元素单独传入做计算，而右边不会(B)。
+
+所以 A 是 `'a'` 的时候，B 是 `'a' | 'b' | 'c'`， A 是 `'b'` 的时候，B 是 `'a' | 'b' | 'c'`...
+
+#### 实现
+
+```ts
+type IsUnion<A, B = A> =
+    A extends A
+        ? [B] extends [A]
+            ? false
+            : true
+        : never
+```
+
+**当 A 是联合类型时：**
+
+`A extends A` 这种写法是为了触发分布式条件类型，让每个类型单独传入处理的，没别的意义。
+
+`A extends A` 和 `[A] extends [A]` 是不同的处理，前者是单个类型和整个类型做判断，后者两边都是整个联合类型，因为只有 `extends` 左边直接是类型参数才会触发分布式条件类型。
+
+### 元组转联合类型
+
+#### 查找类型
+
+```ts
+interface Person {
+  name: string;
+  age: number;
+  location: string;
+}
+type K1 = keyof Person; // "name" | "age" | "location"
+type K2 = keyof Person[]; // "length" | "push" | "pop" | "concat" | ...
+type K3 = keyof { [x: string]: Person }; // string
+
+// The dual of this is indexed access types, also called lookup types. Syntactically, they look exactly like an element access, but are written as types:
+
+type P1 = Person["name"]; // string
+type P2 = Person["name" | "age"]; // string | number
+type P3 = string["charAt"]; // (pos: number) => string
+type P4 = string[]["push"]; // (...items: string[]) => number
+type P5 = string[][0]; // string
+```
+
+由`type P2`可以看到，查找类型中的[]内可以是联合类型，返回一个与之索引对应的联合类型。那么，元组转联合可以很简单的这样子实现
+
+```ts
+type tuple = ["beyond", "hello"];
+
+type res = tuple[number];
+// type res = "beyond" | "hello"
+```
+
+其中number相当于`0 | 1 | 2 | 3`....
+
+### 小案例
+
+#### 实现BEM
+
+```ts
+type BEM<
+  B extends string,
+  E extends string[],
+  M extends string[]
+> = `${B}__${E[number]}--${M[number]}`;
+
+type bemResult = BEM<"beyond", ["aaa", "bbb"], ["warning", "success"]>;
+// type bemResult = "beyond__aaa--warning" | "beyond__aaa--success" | "beyond__bbb--warning" | "beyond__bbb--success"
+```
+
+字符串类型中遇到联合类型的时候，会每个元素单独传入计算
+
+#### 排列组合
+
+##### 两两组合
+
+```ts
+type CombTwo<A extends string, B extends string> =
+  | A
+  | B
+  | `${A}${B}`
+  | `${B}${A}`;
+
+type res = CombTwo<"D", "Q">;
+// type res = "D" | "Q" | "DQ" | "QD"
+```
+
+##### 多个组合
+
+```ts
+type CombAll<U extends string, UB extends string = U> = U extends UB
+  ? CombTwo<U, CombAll<Exclude<UB, U>>>
+  : never;
+
+type resAll = CombAll<"A" | "B" | "C">;
+// type resAll = "A" | "B" | "C" | "BC" | "CB" | "AB" | "AC" | "ABC" | "ACB" | "BA" | "CA" | "BCA" | "CBA" | "BAC" | "CAB"
+```
+
+推理：每次拿出来一个，剩下的元素递归，直到只剩一个，两两组合。
+
+```ts
+// 传入 "A" | "B" | "C"
+CombTwo<"A", CombAll<"B" | "C">>
+CombTwo<"B", CombAll<"A" | "C">>
+CombTwo<"C", CombAll<"B" | "A">>
+
+// 拿第一行举例，传入 "B" | "C"
+CombTwo<"B", CombAll<"C">> 相当于 CombTwo<"B","C">
+CombTwo<"C", CombAll<"B">> 相当于 CombTwo<"C","B">
+
+// 其他同理
+```
+
+## 一些特性
+
+### IsAny
+
+any 类型与任何类型的交叉都是 any，也就是 1 & any 结果是 any。
+
+```ts
+type IsAny<T> = true extends false & T ? true : false;
+
+type res1 = IsAny<string>;
+type res2 = IsAny<boolean>;
+type res3 = IsAny<unknown>;
+type res4 = IsAny<undefined>;
+type res5 = IsAny<any>; //true
+```
+
+这里只需要保证true和false位置上的类型是不同的即可
+
+那如果相同了呢？
+
+```ts
+type IsAny<T> = true extends true & T ? true : false;
+
+type res1 = IsAny<string>;
+type res2 = IsAny<boolean>; // true
+type res3 = IsAny<unknown>; //true
+type res4 = IsAny<undefined>;
+type res5 = IsAny<any>; //true
+```
+
+那么会让any, unknow, 和参与条件判断的类型都为true
+
+#### 一个特性
+
+传参为any类似分布式，将结果联合返回
+
+```ts
+type Test<T> = T extends number ? 1 : 2;
+type res = Test<any>;
+// type res = 1 | 2
+```
+
+### isEqual
+
+之前的写法会导致任何类型与any对比都返回true
+
+```ts
+type IsEqual<A, B> = (A extends B ? true : false) & (B extends A ? true : false);
+```
+
+所以需改进一下
+
+```ts
+type IsEqual<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+    ? true : false;
+```
+
+这个与ts源码有关系，看不懂可以先记住
+
+### isUnion
+
+```ts
+type IsUnion<A, B = A> =
+    A extends A
+        ? [B] extends [A]
+            ? false
+            : true
+        : never
+```
+
+never 在条件类型中也比较特殊，如果条件类型左边是类型参数，并且传入的是 never，那么直接返回 never：
+
+```ts
+type TestNever<T> = T extends number ? 1 : 2;
+type res = TestNever<never> // never
+```
+
+需要这样写
+
+```ts
+type IsNever<T> = [T] extends [never] ? true : false
+type res = TestNever<never> // true
+```
+
+#### isTuple
+
+元组类型的 length 是数字字面量，而数组的 length 是 number。
+
+```ts
+type NotEqual<A, B> = 
+    (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+    ? false : true;
+
+type IsTuple<T> = 
+    T extends [...params: infer Eles] 
+        ? NotEqual<Eles['length'], number> 
+        : false
+```
+
+#### 联合转交叉
+
+类型之间是有父子关系的，更具体的那个是子类型，比如 A 和 B 的交叉类型 A & B 就是联合类型 A | B 的子类型，因为更具体。
+
+如果允许父类型赋值给子类型，就叫做逆变。
+如果允许子类型赋值给父类型，就叫做协变。
+
+在 TypeScript 中有函数参数是有逆变的性质的，也就是如果参数可能是多个类型，参数类型会变成它们的交叉类型。
+
+```ts
+type UnionToIntersection<U> = (
+  U extends U ? (x: U) => unknown : never
+) extends (x: infer R) => unknown
+  ? R
+  : never;
+
+type res = UnionToIntersection<{ a: 2 } | { b: 3 }>;
+/*
+type res = {
+    a: 2;
+} & {
+    b: 3;
+}
+*/
+```
+
+#### 提取可选类型
+
+可选索引的值为 undefined 和值类型的联合类型。
+
+```ts
+type GetOptional<Obj extends Record<string, any>> = {
+  [Key in keyof Obj as {} extends Pick<Obj, Key> ? Key : never]: Obj[Key];
+};
+
+type test = {
+  a: "beyond";
+  b: "hello";
+  c?: "2023";
+};
+
+type res = GetOptional<test>;
+/* 
+type res = {
+    c?: "2023" | undefined;
+}
+*/
+```
+
+#### 提取必选类型
+
+```ts
+type GetRequired<Obj extends Record<string, any>> = {
+  [Key in keyof Obj as {} extends Pick<Obj, Key> ? never : Key]: Obj[Key];
+};
+
+type res2 = GetRequired<test>;
+// type res2 = {
+//     a: "beyond";
+//     b: "hello";
+// }
+```
+
+#### 移除索引签名
+
+索引类型可能有索引，也可能有可索引签名。
+
+比如：
+
+```ts
+type beyond = {
+  [key: string]: any;
+  coding(): void;
+}
+```
+
+这里的 sleep 是具体的索引，[key: string]: any 就是可索引签名，代表可以添加任意个 string 类型的索引。
+
+##### 性质：索引签名不能构造成字符串字面量类型，因为它没有名字，而其他索引可以
+
+```ts
+type RemoveIndexSignature<Obj extends Record<string, any>> = {
+  [Key in keyof Obj as Key extends `${infer Str}` ? Str : never]: Obj[Key];
+};
+
+type res = RemoveIndexSignature<beyond>;
+// type res = {
+//     coding: () => void;
+// }
+```
+
+#### 获取类的公共属性
+
+```ts
+type ClassPublicProps<Obj extends Record<string, any>> = {
+    [Key in keyof Obj]: Obj[Key]    
+}
+```
+
+#### as const
+
+让推导出的类型具有字面量
+
+```ts
+const beyond = {
+  a: 3,
+  b: false,
+} as const;
+
+type res = typeof beyond;
+// type res = {
+//     readonly a: 3;
+//     readonly b: false;
+// }
+```
+
+这样推导出来的类型进行模式匹配时，也需要使用readonly修饰，否则匹配不到
+
+### 总结
+
+- any 类型与任何类型的交叉都是 any，也就是 1 & any 结果是 any，可以用这个特性判断 any 类型。
+- 联合类型作为类型参数出现在条件类型左侧时，会分散成单个类型传入，最后合并。
+never 作为类型参数出现在条件类型左侧时，会直接返回 never。
+- any 作为类型参数出现在条件类型左侧时，会直接返回 trueType 和 falseType 的联合类型。
+- 元组类型也是数组类型，但 length 是数字字面量，而数组的 length 是 number。可以用来判断元组类型。
+- 函数参数处会发生逆变，可以用来实现联合类型转交叉类型。
+- 可选索引的索引可能没有，那 Pick 出来的就可能是 {}，可以用来过滤可选索引，反过来也可以过滤非可选索引。
+- 索引类型的索引为字符串字面量类型，而可索引签名不是，可以用这个特性过滤掉可索引签名。
+- keyof 只能拿到 class 的 public 的索引，可以用来过滤出 public 的属性。
+- 默认推导出来的不是字面量类型，加上 as const 可以推导出字面量类型，但带有 readonly 修饰，这样模式匹配的时候也得加上 readonly 才行。
+
+## 综合
+
+### ParseQueryString
+
+#### 基础情况
+
+a=1&b=2&c=3&d=4解析成索引类型
+
+```ts
+// 解析单个键值对，例如a=1，将这个字符串转换为索引类型{a:1}
+type ParseSingleQuery<Str extends string> = Str extends `${infer P}=${infer V}`
+  ? Record<P, V>
+  : {};
+
+// 解析整个query，每次只处理一对，然后填入到Res中进入下一次递归
+type ParseQuery<
+  Str extends string,
+  Res extends Record<string, any> = {}
+> = Str extends `${infer First}&${infer Rest}`
+  ? ParseQuery<Rest, CombRecord<Res, ParseSingleQuery<First>>>
+  // 循环到最后传入d=1，匹配不到?&?模式，所以将d=1单独解析，合并返回
+  : CombRecord<Res,ParseSingleQuery<Str>>;
+
+// 结合两个索引类型，比如{a:1}和{b:2}结合，结果为{a:1,b:2}
+type CombRecord<
+  R1 extends Record<string, any>,
+  R2 extends Record<string, any>
+> = {
+  [K in keyof (R1 & R2)]: K extends keyof R1
+    ? R1[K]
+    : K extends keyof R2
+    ? R2[K]
+    : never;
+};
+
+type a = "a=1&b=2&c=3&d=4";
+
+type res = ParseQuery<a>;
+// type res = {
+//   a: "1";
+//   b: "2";
+//   c: "3";
+//   d: "4";
+// }
+```
+
+#### 合并情况
+
+a=1&a=2&b=2&c=3将重复参数合并为一个数组
+
+```ts
+type ParseParam<Param extends string> = 
+    Param extends `${infer Key}=${infer Value}`
+        ? {
+            [K in Key]: Value 
+        } : {};
+
+type ParseParamResult = ParseParam<'a=1'>;
+
+type MergeValues<One, Other> = 
+    One extends Other 
+        ? One
+        : Other extends unknown[]
+            ? [One, ...Other]
+            : [One, Other];
+
+type MergeParams<
+    OneParam extends Record<string, any>,
+    OtherParam extends Record<string, any>
+> = {
+  [Key in keyof OneParam | keyof OtherParam]: 
+    Key extends keyof OneParam
+        ? Key extends keyof OtherParam
+            ? MergeValues<OneParam[Key], OtherParam[Key]>
+            : OneParam[Key]
+        : Key extends keyof OtherParam 
+            ? OtherParam[Key] 
+            : never
+}
+
+type MergeParamsResult = MergeParams<{ a: 1 }, { b: 2 }>;
+
+type ParseQueryString<Str extends string> = 
+    Str extends `${infer Param}&${infer Rest}`
+        ? MergeParams<ParseParam<Param>, ParseQueryString<Rest>>
+        : ParseParam<Str>;
+
+
+type ParseQueryStringResult = ParseQueryString<'a=1&a=2&b=2&c=3'>;
+
+
+// type ParseQueryStringResult = {
+//     a: ["1", "2"];
+//     b: "2";
+//     c: "3";
+// }
 ```
